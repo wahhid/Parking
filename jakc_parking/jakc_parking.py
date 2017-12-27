@@ -3,7 +3,7 @@ from datetime import datetime
 from decimal import Decimal
 from pytz import timezone
 
-from openerp.osv import fields, osv
+from odoo import fields, models, api
 
 _logger = logging.getLogger(__name__)
 
@@ -14,20 +14,14 @@ AVAILABLE_STATES = [
     ('done','Close'),
 ]
 
-class parking_vehicle_type(osv.osv):
-    _name = "parking.vehicle.type"
+class ParkingVehicleType(models.Model):
+    _ame = "parking.vehicle.type"
     _description = "Parking Vehicle Type"
-    _columns = {
-        'name': fields.char('Name', size=100, required=True),
-        'state': fields.selection(AVAILABLE_STATES, 'Status', size=16, readonly=True),
-    }
-    _defaults = {
-        'state': lambda  *a: 'open',
-    }
-parking_vehicle_type()
+    name = fields.Char('Name', size=100, required=True)
+    state = fields.Selection(AVAILABLE_STATES,'Status', size=16, readonly=True, default='open')
 
 
-class parking_shift(osv.osv):
+class ParkingShift(models.Model):
     _name = "parking.shift"
     _description = "Parking Shift"
     
@@ -40,26 +34,25 @@ class parking_shift(osv.osv):
         ids = self.search(cr, uid, args, context=context)
         return self.browse(cr, uid, ids, context=context)
     
-    def _convert_time_to_str(self, cr, uid, float_time, context=None):
+    def _convert_time_to_str(self, float_time):
         str_float_time  = str(float_time)
         dict_float_time = str_float_time.split(".")
         hour = dict_float_time[0].zfill(2)
         minutes = str(Decimal(float(str_float_time)) % 1 * 60).replace(".","").zfill(2)[:2]
         return hour + ":"  + minutes
-            
-    def get_current_shift(self, cr, uid, context=None):
+
+    def get_current_shift(self):
         current_shift = False        
         tzinfo = timezone('Asia/Jakarta')
-        shift_ids = self.search(cr, uid, [], context=context)
-        shifts = self.browse(cr, uid, shift_ids, context=context)        
+        shift_ids = self.search([])
         str_now = datetime.now(timezone("Asia/Jakarta"))
         #str_now = datetime.now()                                
         _logger.info("Now : "  + str_now.strftime('%Y-%m-%d %H:%M:%S'))
-        for shift in shifts:
+        for shift in shift_ids:
             #Convert Start Time to String
-            str_start_time = self._convert_time_to_str(cr, uid, shift.start_time, context)
+            str_start_time = self._convert_time_to_str(shift.start_time)
             #Convert End Time to String
-            str_end_time = self._convert_time_to_str(cr, uid, shift.end_time, context)                                
+            str_end_time = self._convert_time_to_str(shift.end_time)
             shift_start = str_now.strftime('%Y-%m-%d') + " " + str_start_time + ":00"
             _logger.info("Shift Start : " + shift_start)            
             shift_end = str_now.strftime('%Y-%m-%d') + " " + str_end_time + ":00"
@@ -75,17 +68,9 @@ class parking_shift(osv.osv):
                 current_shift = shift                
                 break
         return current_shift
-        
-    _columns = {
-        'name': fields.char('Name', size=100, required=True),
-        'start_time': fields.float('Start Time', required=True),
-        'end_time': fields.float('End Time', required=True),
-        'next_day': fields.boolean('Next Day'),
-        'state': fields.selection(AVAILABLE_STATES,size=16),
-    }
-    
-    _defaults = {
-        'next_day': lambda *a: False,
-        'state': lambda *a: 'open',
-    }
-parking_shift()
+
+    name = fields.Char('Name', size=100, required=True)
+    start_time = fields.Float('Start Time', required=True)
+    end_time = fields.Float('End Time', required=True)
+    next_day = fields.Boolean('Next Day', default=False)
+    state = fields.Selection(AVAILABLE_STATES,size=6, readonly=True, default='open')
