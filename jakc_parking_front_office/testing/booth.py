@@ -1,0 +1,7 @@
+
+class Booth(object):
+	pass
+	
+		
+	
+	
