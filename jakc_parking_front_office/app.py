@@ -6,7 +6,7 @@ from frame.manlessframe import Parking_ManlessFrame
 
 
 class Parking_ClientMain(wx.App):
-		
+
 	def OnInit(self):	
 		self.logindialog = Parking_LoginDialog(None)
 		self.logindialog.Show()
