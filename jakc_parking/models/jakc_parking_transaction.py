@@ -4,7 +4,8 @@ from datetime import datetime
 from pytz import timezone
 from random import randint
 
-from openerp.osv import fields, osv
+from odoo import models, fields, api
+from odoo.exceptions import ValidationError, Warning
 
 _logger = logging.getLogger(__name__)
 
@@ -47,28 +48,25 @@ AVAILABLE_CHARGING_TYPES = [
     ('free', 'Free'),
 ]
 
-class ir_attachment(osv.osv):
+
+class IrAttachment(models.Model):
     _name = "ir.attachment"
     _inherit = "ir.attachment"
-    _columns = {
-        'binary_field' : fields.char('Binary Field', size=50),
-        'trans_id': fields.many2one('parking.transaction','Transaction ID'),
-    }
-ir_attachment()
 
-class parking_transaction_session(osv.osv):
+    binary_field = fields.Char('Binary Field', size=50)
+    trans_id = fields.Many2one('parking.transaction', 'Transaction ID')
+
+
+class ParkingTransactionSession(models.Model):
     _name = "parking.transaction.session"
     _inherit = ['mail.thread', 'ir.needaction_mixin']
     _description = "Parking Transaction Session"
-    
-    def get_trans(self, cr, uid, ids, context=None):
-        trans_id = ids[0]
-        return self.browse(cr, uid, trans_id, context=context)
-    
-    def trans_close(self, cr, uid, ids, values, context=None):
+
+    @api.one
+    def trans_close(self):
         values = {}
         values.update({'state': 'done'})
-        return self.write(cr, uid, ids, values, context=context)
+        self.write(values)
         
     def _close(self, cr, uid, ids, values, context=None):
         _logger.info("Start Close Parking Transaction Session")        
@@ -82,17 +80,13 @@ class parking_transaction_session(osv.osv):
             self.message_post(cr, uid, ids[0], body="Transaction status change to <b>Close</b>", subtype='mt_comment', context=context)
         _logger.info("End Close Parking Transaction Session")
         return super(parking_transaction_session, self).write(cr, uid, ids, values, context=context)         
-    
-    def trans_re_open(self, cr, uid, ids, values, context=None):
-        _logger.info("Start Transaction Re-Open")
+
+    @api.one
+    def trans_re_open(self):
         values = {}        
         values.update({'state': 'reopen'})        
-        return self.write(cr, uid, ids, values, context=context)
-                
-    def _re_open(self, cr, uid, ids, values, context=None):                            
-        values.update({'state': 'open'})
-        self.message_post(cr, uid, ids[0], body="Transaction status change to <b>Open</b>", subtype='mt_comment', context=context)            
-        return super(parking_transaction_session, self).write(cr, uid, ids, values, context=context)    
+        super(ParkingTransactionSession,self).write(values)
+        self.message_post("Transaction status change to <b>Open</b>")
 
     def trans_request_correction(self, cr, uid, ids, context=None):
         _logger.info("Send Email")
@@ -113,11 +107,11 @@ class parking_transaction_session(osv.osv):
             'target': 'new',
          } 
         
-    def correction(self, cr, uid, ids, values, context=None):
+    def correction(self, values):
         #self.message_post(cr, uid, ids[0], body="Correction", subtype='mt_comment', context=context)
-        return super(parking_transaction_session, self).write(cr, uid, ids, values, context=context)
+        return super(ParkingTransactionSession, self).write(values)
                
-    def trans_receipt(self, cr, uid, ids, values, context=None):        
+    def trans_receipt(self):
         _logger.info("Print Receipt for ID : " + str(ids))            
         id = ids[0]   
         config = self.pool.get('parking.config').get_config(cr, uid, context=context)
@@ -134,213 +128,174 @@ class parking_transaction_session(osv.osv):
             'target': 'new' 
         }
                        
-    def get_active_session(self, cr, uid, shift_id, booth_id, operator_id, context=None):
+    def get_active_session(self, shift_id, booth_id, operator_id):
         args = [('shift_id','=' , shift_id),('booth_id','=',booth_id),('operator_id', '=' , operator_id),('session_date','=', datetime.now(timezone("Asia/Jakarta")).strftime('%Y-%m-%d'))]
-        session_ids = self.search(cr, uid, args, context=context)
+        session_ids = self.search(args)
         if session_ids:
-            return self.browse(cr, uid, session_ids[0], context=context)
+            return session_ids[0]
         else:
             return False             
-           
-    def get_parking_transaction_count(self, cr, uid, ids, field_name, args, context=None):
-        id = ids[0]
-        res = {} 
+
+    @api.one
+    def get_parking_transaction_count(self):
         sql_req= "SELECT count(*) as total FROM parking_transaction a WHERE a.session_id=" + str(id) + " AND a.state='done'"        
-        cr.execute(sql_req)
-        sql_res = cr.dictfetchone()
-        
+        self.env.cr.execute(sql_req)
+        sql_res = self.env.cr.dictfetchone()
+
         if sql_res:
-            total_trans = sql_res['total']
+            self.total_trans = sql_res['total']
         else:
-            total_trans = 0
-                            
-        res[id] = total_trans    
-        return res         
-                
-    def get_parking_transaction_amount(self, cr, uid, ids, field_name, args, context=None):
-        id = ids[0]
-        res = {} 
+            self.total_trans = 0
+
+    @api.one
+    def get_parking_transaction_amount(self):
         sql_req= "SELECT sum(total_amount) as total FROM parking_transaction a WHERE a.session_id=" + str(id) + " AND a.state='done'"        
-        cr.execute(sql_req)
-        sql_res = cr.dictfetchone()
+        self.env.cr.execute(sql_req)
+        sql_res = self.env.cr.dictfetchone()
         
         if sql_res:
-            total_trans = sql_res['total']
+            self.total_amount = sql_res['total']
         else:
-            total_trans = 0
-                            
-        res[id] = total_trans    
-        return res         
-        
-    def get_parking_transaction_correction(self, cr, uid, ids, field_name, args, context=None):
-        id = ids[0]
-        res = {} 
+            self.total_amount = 0
+
+    @api.one
+    def get_parking_transaction_correction(self):
         sql_req= "SELECT sum(total_amount) as total FROM parking_transaction a WHERE a.session_id=" + str(id) + " AND a.state='correction'"        
-        cr.execute(sql_req)
-        sql_res = cr.dictfetchone()
-        
+        self.env.cr.execute(sql_req)
+        sql_res = self.env.cr.dictfetchone()
         if sql_res:
-            total_trans = sql_res['total']
+            self.total_correction = sql_res['total']
         else:
-            total_trans = 0
-                            
-        res[id] = total_trans    
-        return res         
-    
-    def get_parking_transaction_pinalty(self, cr, uid, ids, field_name, args, context=None):
-        id = ids[0]
-        res = {} 
+            self.total_correction = 0
+
+    @api.one
+    def get_parking_transaction_pinalty(self):
         sql_req= "SELECT sum(total_amount) as total FROM parking_transaction a WHERE a.session_id=" + str(id) + " AND trans_type='2' AND a.state='done'"        
-        cr.execute(sql_req)
-        sql_res = cr.dictfetchone()
+        self.env.cr.execute(sql_req)
+        sql_res = self.env.cr.dictfetchone()
         
         if sql_res:
-            total_trans = sql_res['total']
+            self.total_pinalty = sql_res['total']
         else:
-            total_trans = 0
-                            
-        res[id] = total_trans    
-        return res         
-        
-    _columns = {
-        'name': fields.char('Name', size=50, required=True, readonly=True),
-        'session_date': fields.date('Session Date', required=True, readonly=True),
-        'shift_id': fields.many2one('parking.shift', 'Shift', required=True, readonly=True),
-        'booth_id': fields.many2one('parking.booth', 'Booth', required=True, readonly=True),
-        'operator_id': fields.many2one('res.users','Operator', required=True, readonly=True),
-        'total_trans': fields.function(get_parking_transaction_count, type="integer", string='Total Transaction'),
-        'total_amount': fields.function(get_parking_transaction_amount, type="integer", string='Total Amount'),
-        'total_pinalty': fields.function(get_parking_transaction_pinalty, type="integer", string='Total Pinalty'),
-        'total_correction': fields.function(get_parking_transaction_correction, type="integer", string='Total Correction'),        
-        'state' : fields.selection(AVAILABLE_SESSION_STATES, 'Status', size=16, readonly=True)                
-    } 
-    _defaults = {            
-        'state': lambda *a : 'open',
-    }
-    
-    def create(self, cr, uid, values, context=None):        
-        shift = self.pool.get('parking.shift').get_current_shift(cr, uid, context=context)
+            self.total_pinalty = 0
+
+
+    name = fields.Char('Name', size=50, required=True, readonly=True)
+    session_date = fields.Date('Session Date', required=True, readonly=True)
+    shift_id = fields.Many2one('parking.shift', 'Shift', required=True, readonly=True)
+    booth_id = fields.Many2one('parking.booth', 'Booth', required=True, readonly=True)
+    operator_id = fields.Many2one('res.users', 'Operator', required=True, readonly=True)
+    total_trans = fields.Float(compute='get_parking_transaction_count', string='Total Transaction')
+    total_amount = fields.Float(compute='get_parking_transaction_amount', string='Total Amount')
+    total_pinalty = fields.Float(compute='get_parking_transaction_pinalty', string='Total Pinalty')
+    total_correction = fields.Float(compute='get_parking_transaction_correction', string='Total Correction')
+    parking_transaction_ids = fields.One2many('parking.transaction','session_id','Transaction')
+    state = fields.selection(AVAILABLE_SESSION_STATES, 'Status', size=16, readonly=True, default='open')
+
+    def create(self, values):
+        parking_shift_obj = self.env['parking.shift']
+        parking_booth_obj = self.env['parking.booth']
+        res_users_obj = self.env['res.users']
+
+        shift = parking_shift_obj.get_current_shift()
         if not shift:
-            raise osv.except_osv(('Error'), ('Shift not Found!'))
-        booth = self.pool.get('parking.booth').get_trans(cr, uid, [values.get('booth_id')], context=context)                
-        operator = self.pool.get('res.users').browse(cr, uid, values.get('operator_id'), context=context)            
-        name = operator.name + " - " + booth.name + " -  " + shift.name         
-        session = self.get_active_session(cr, uid, shift.id, values.get('booth_id'),values.get('operator_id'), context=context)
+            raise ValidationError('Shift not Found')
+
+        session = self.get_active_session(shift.id, values.get('booth_id'),values.get('operator_id'))
         if session:
-            if session.state == 'done':
-                values = {}
-                self.trans_re_open(cr, uid, [session.id], values, context=context)                                    
             return session.id
         else:
+            if 'booth_id' not in values.keys():
+                raise ValidationError('Booth not Found')
+            booth = parking_booth_obj.browse(values.get('booth_id'))
+
+            if 'operator_id' not in values.keys():
+                raise ValidationError('Booth not Found')
+            operator = res_users_obj.browse(values.get('operator_id'))
+
+            name = operator.name + " - " + booth.name + " -  " + shift.name
             str_now = datetime.now(timezone("Asia/Jakarta"))
             session_date = str_now.strftime('%Y-%m-%d')
             values.update({'name': name})
             values.update({'shift_id': shift.id})
             values.update({'session_date': session_date})
-            result = super(parking_transaction_session, self).create(cr, uid, values, context=context)
+            result = super(ParkingTransactionSession, self).create(values)
             return result
-    
-    def write(self, cr, uid, ids, values, context=None):
-        trans = self.get_trans(cr, uid, ids, context=context)
-        
-        if not trans:
-            raise osv.except_osv(('Error'), ('Transaction not Found!'))
-                
-        if trans.state == 'done':            
-            if 'state' in values.keys():
-                _logger.info("State : " + values.get('state'))        
-                if values.get('state') == 'reopen':                
-                    return self._re_open(cr, uid, ids, values, context=context)
-            else:
-                raise osv.except_osv(('Warning'),   ('Transaction Reopen Failed!'))    
-                    
-            raise osv.except_osv(('Warning'),   ('Transaction Already Closed!'))                
-        
-        if 'state' in values.keys():                    
-            if values.get('state') == 'done':
-                return self._close(cr, uid, ids, values, context=context)
-                    
-        return super(parking_transaction_session, self).write(cr, uid, ids, values, context=context)
-                
-parking_transaction_session()
 
-class parking_transaction(osv.osv):
+    def write(self, values):
+        session = self
+        if session.state == 'done':
+            raise ValidationError('Transaction Already Closed!')
+
+        return super(ParkingTransactionSession, self).write(values)
+
+
+class parking_transaction(models.Model):
     _name = "parking.transaction"
 
-    def get_trans(self, cr, uid, ids, context=None):
-        trans_id = ids[0]
-        return self.browse(cr, uid, trans_id, context=context)
-        
-    def _get_booth_code(self, cr, uid, booth_id, context=None):
-        booth = self.pool.get('parking.booth').browse(cr, uid, booth_id, context=context)
-        return booth.code
-            
+    def _get_booth_code(self, booth_id):
+        booth = self.env['parking.booth'].browse(booth_id)
+        if booth:
+            return booth.code
+        else:
+            return False
     
-    def _generate_trans_id(self, cr, uid, context=None):        
+    def _generate_trans_id(self):
         local_date = self._utc_to_local("Asia/Jakarta", datetime.now())
         prefix  = local_date.strftime('%Y%m%d%H%M%S%f')
-        #number_seq = self.pool.get('ir.sequence').get(cr, uid, 'parking.transaction.sequence')[0] 
         return prefix
         
-    def _check_vehicle(self, cr, uid, plat_number, context=None):        
+    def _check_vehicle(self, plat_number):
         args = [('plat_number','=',plat_number),('state','=','entry')]        
-        ids = self.search(cr, uid, args, context=context)
-        if ids:
+        parking_transaction_ids = self.search(args)
+        if len(parking_transaction_ids) > 0:
             return True
         else:
             return False
     
-    def _is_member(self, cr, uid, ids, card_number, context=None):
-        if ids:
-            trans = self.get_trans(cr, uid, ids, context=context)
-            args = [('card_number','=',card_number),('state','=','open')]
-            ids = self.pool.get('parking.membership').search(cr, uid, args, context=context)
-            if ids:                 
-                membership_id = ids[0]
-                payment_args = [('parking_membership_id','=',membership_id),('state','=','paid')]
-                payment_ids = self.pool.get('parking.membership.payment').search(cr, uid, payment_args, order="start_date desc",context=context)
-                if payment_ids:
-                    payments = self.pool.get('parking.membership.payment').search(cr, uid, payment_args, context=context)
-                    payment = payments[0]
-                    if payment.end_date > trans.end_date and payment.start_date < trans.start_date:
-                        return True
-                    else:
-                        return False                                                                                                                                                                            
+    def _is_member_by_card_number(self, card_number):
+        parking_transaction = self
+        args = [('card_number','=',card_number),('state','=','open')]
+        parking_membership_ids = self.env['parking.membership'].search(args)
+        if len(parking_membership_ids) > 0:
+            parking_membership = parking_membership_ids[0]
+            payment_args = [('parking_membership_id', '=', parking_membership.id), ('state', '=', 'paid')]
+            parking_membership_payment_ids = self.env['parking.membership.payment'].search(payment_args)
+            if len(parking_membership_payment_ids)>0:
+                parking_membership_payment = parking_membership_payment_ids[0]
+                if parking_membership_payment.end_date > parking_transaction.end_date and parking_membership_payment.start_date < parking_transaction.start_date:
+                    return True
+                else:
+                    return False
             else:
                 return False
         else:
             return False
         
-    def _is_member_by_plat_number(self, cr, uid, ids, plat_number, context=None):
-        if ids:
-            trans = self.get_trans(cr, uid, ids, context=context)
-            args = [('plat_number','=',plat_number),('state','=','open')]
-            ids = self.pool.get('parking.membership').search(cr, uid, args, context=context)
-            if ids:                 
-                membership_id = ids[0]
-                payment_args = [('parking_membership_id','=',membership_id),('state','=','paid')]
-                payment_ids = self.pool.get('parking.membership.payment').search(cr, uid, payment_args, order="start_date desc",context=context)
-                if payment_ids:
-                    payments = self.pool.get('parking.membership.payment').search(cr, uid, payment_args, context=context)
-                    payment = payments[0]
-                    if payment.end_date > trans.end_date and payment.start_date < trans.start_date:
-                        return True
-                    else:
-                        return False                                                                                                                                                                            
-            else:
-                return False
+    def _is_member_by_plat_number(self, plat_number):
+        parking_transaction = self
+        args = [('plat_number','=',plat_number),('state','=','open')]
+        parking_membership_ids = self.env['parking.membership'].search(args)
+        if len(parking_membership_ids)>0:
+            parking_membership = parking_membership_ids[0]
+            payment_args = [('parking_membership_id','=',parking_membership.id),('state','=','paid')]
+            parking_membership_payment_ids = self.env['parking.membership.payment'].search(payment_args, order="start_date desc")
+            if len(parking_membership_payment_ids)>0:
+                parking_membership_payment = parking_membership_payment_ids[0]
+                if parking_membership_payment.end_date > parking_transaction.end_date and parking_membership_payment.start_date < parking_transaction.start_date:
+                    return True
+                else:
+                    return False
         else:
             return False
-    
-    def trans_close(self, cr, uid, ids, values, context=None):
+
+    @api.one
+    def trans_close(self):
         values = {}
         values.update({'state': 'done'})
-        self.write(cr, uid, ids, values, context=context)
-        
-    def close(self, cr, uid, ids, values, context=None):            
-        return super(parking_transaction, self).write(cr, uid, ids, values, context=context)
+        self.write(values)
     
-    def close_by_session(self, cr, uid, session_id, context=None):        
+    def close_by_session(self, cr, uid, session_id, context=None):
         sql_req = "UPDATE parking_transaction SET state='done' WHERE session_id=" + str(session_id) + " AND state='exit'"
         cr.execute(sql_req)
                 
@@ -415,8 +370,7 @@ class parking_transaction(osv.osv):
             values.update({'entry_member': False})                                   
                                                 
         return super(parking_transaction, self).create(cr, uid, values, context=context)
-        
-                
+
     def create_manual_transaction(self,cr, uid, values, context=None):
         _logger.info("Start Create Manual Transaction")
         
@@ -446,8 +400,7 @@ class parking_transaction(osv.osv):
             values.update({'entry_member': False})                                   
                                                 
         return super(parking_transaction, self).create(cr, uid, values, context=context)        
-        
-                
+
     def _calculate_duration(self, cr, uid, ids, context=None):
         trans = self.get_trans(cr, uid, ids, context)
         
@@ -622,80 +575,63 @@ class parking_transaction(osv.osv):
         utc = local_datetime.astimezone(pytz.utc)
         return utc
 
-        
-            
-    _columns = {
-        'session_id': fields.many2one('parking.transaction.session','Session',readonly=True),
-        'trans_id': fields.char('Transaction #', size=21, required=True, readonly=True),
-        'barcode': fields.char('Barcode #', size=13, required=True, readonly=True),
-        'card': fields.char('Card #', size=20),
-        'trans_type': fields.selection(AVAILABLE_TRANS_TYPES, 'Transaction Type', size=16, required=True, readonly=True),
-        'plat_number': fields.char('Plat Number', size=21, required=True),
-        'card_number': fields.char('Card Number', size=20, readonly=True),
-        'sequence_number':fields.char('Sequence #', size=10, readonly=True),
-        'input_method': fields.selection(AVAILABLE_INPUT_METHODS, 'Method'),
-        'is_manual': fields.boolean('Is Manual', readonly=True),
-        'is_pinalty': fields.boolean('Is Pinalty', readonly=True),
-        'entry_datetime': fields.datetime('Entry Date Time', required=True),
-        'entry_member': fields.boolean('Entry Member'),
-        'entry_booth_id': fields.many2one('parking.booth','Entry Booth', required=True),
-        'entry_operator_id': fields.many2one('hr.employee','Entry Operator', required=True),
-        'entry_driver_id': fields.many2one('hr.employee','Entry Driver'),
-        'entry_shift_id': fields.many2one('parking.shift', 'Entry Shift', required=True),
-        'exit_datetime': fields.datetime('Exit Date Time'),
-        'exit_member': fields.boolean('Exit Member'),
-        'exit_booth_id': fields.many2one('parking.booth','Exit Booth'),
-        'exit_operator_id': fields.many2one('hr.employee','Exit Operator'),
-        'exit_driver_id': fields.many2one('hr.employee','Exit Driver'),
-        'exit_shift_id': fields.many2one('parking.shift', 'Exit Shift'),
-        'hours': fields.float('Hours', readonly=True),
-        'minutes': fields.float('Minutes', readonly=True),
-        'seconds': fields.float('Seconds', readonly=True),        
-        'pricing_id': fields.many2one('parking.pricing', 'Pricing'),
-        'casual_charging': fields.float('Casual Charging' , readonly=True),
-        'service_charging': fields.float('Service Charging' , readonly=True),        
-        'pinalty_charging': fields.float('Pinalty Charging' , readonly=True),
-        'voucher_charging': fields.float('Voucher Charging', readonly=True),
-        'rules_charging': fields.float('Rules Charging', readonly=True),        
-        'total_amount': fields.float('Total Charging', readonly=True),
-        'entry_front_image': fields.function(_get_binary_filesystem, fnct_inv=_set_binary_filesystem, type='binary', string='Entry Front'),
-        'exit_front_image': fields.function(_get_binary_filesystem, fnct_inv=_set_binary_filesystem, type='binary', string='Exit Front'),        
-        'attach_ids':fields.one2many('ir.attachment', 'trans_id', 'Image Attachment',  ondelete='cascade'),
-        'image_ids': fields.many2many('ir.attachment', 'parking_transaction_attachment_rel', 'trans_id', 'image_id', 'Images',  ondelete='cascade'),
-        'charging_ids': fields.one2many('parking.transaction.charging','trans_id','Chargings',  ondelete='cascade'),
-        'correction_ids': fields.one2many('parking.transaction.correction','trans_id','Corrections',  ondelete='cascade'),
-        'state': fields.selection(AVAILABLE_STATES,'Status', size=16, readonly=True),
-    }
-    
-    _defaults = {
-        'entry_datetime': lambda *a: fields.datetime.now(),
-        'is_manual': lambda *a: False,
-        'is_pinalty': lambda *a: False,
-        'entry_member': lambda *a: False,
-        'exit_member': lambda *a: False,
-        'casual_charging': lambda *a: 0,
-        'service_charging': lambda *a: 0,
-        'pinalty_charging': lambda *a: 0,
-        'voucher_charging': lambda *a: 0,
-        'rules_charging': lambda *a: 0,
-        'total_amount': lambda *a: 0,
-        'state': lambda *a: 'entry',
-    }
-    
-       
-    def create(self, cr, uid, values, context=None):        
+    session_id = fields.Many2one('parking.transaction.session', 'Session', readonly=True)
+    trans_id = fields.Char('Transaction #', size=21, required=True, readonly=True)
+    barcode = fields.Char('Barcode #', size=13, required=True, readonly=True)
+    card = fields.Char('Card #', size=20)
+    trans_type = fields.Selection(AVAILABLE_TRANS_TYPES, 'Transaction Type', size=16, required=True, readonly=True),
+    plat_number = fields.Char('Plat Number', size=21, required=True)
+    card_number = fields.Char('Card Number', size=20, readonly=True)
+    sequence_number = fields.Char('Sequence #', size=10, readonly=True)
+    input_method = fields.Selection(AVAILABLE_INPUT_METHODS, 'Method')
+    is_manual = fields.Boolean('Is Manual', readonly=True)
+    is_pinalty = fields.Boolean('Is Pinalty', readonly=True)
+    entry_datetime = fields.Datetime('Entry Date Time', required=True)
+    entry_member = fields.Boolean('Entry Member')
+    entry_booth_id = fields.Many2one('parking.booth', 'Entry Booth', required=True)
+    entry_operator_id = fields.Many2one('hr.employee', 'Entry Operator', required=True)
+    entry_driver_id = fields.Many2one('hr.employee', 'Entry Driver')
+    entry_shift_id = fields.Many2one('parking.shift', 'Entry Shift', required=True)
+    exit_datetime = fields.Datetime('Exit Date Time')
+    exit_member = fields.Boolean('Exit Member')
+    exit_booth_id = fields.Many2one('parking.booth', 'Exit Booth')
+    exit_operator_id = fields.Many2one('hr.employee', 'Exit Operator')
+    exit_driver_id = fields.Many2one('hr.employee', 'Exit Driver')
+    exit_shift_id = fields.Many2one('parking.shift', 'Exit Shift')
+    hours = fields.Float('Hours', readonly=True)
+    minutes = fields.Float('Minutes', readonly=True)
+    seconds = fields.Float('Seconds', readonly=True)
+    pricing_id = fields.Many2one('parking.pricing', 'Pricing')
+    casual_charging = fields.Float('Casual Charging', readonly=True)
+    service_charging = fields.Float('Service Charging', readonly=True)
+    pinalty_charging = fields.Float('Pinalty Charging', readonly=True)
+    voucher_charging = fields.Float('Voucher Charging', readonly=True)
+    rules_charging = fields.Float('Rules Charging', readonly=True)
+    total_amount = fields.Float('Total Charging', readonly=True)
+    image_ids = fields.One2many('parking.transaction.image', 'trans_id', 'Images', ondelete='cascade')
+    charging_ids = fields.One2many('parking.transaction.charging', 'trans_id', 'Chargings', ondelete='cascade')
+    correction_ids = fields.One2many('parking.transaction.correction', 'trans_id', 'Corrections', ondelete='cascade')
+    state = fields.Selection(AVAILABLE_STATES, 'Status', size=16, readonly=True, default='draft')
+
+    def create(self, values):
+        parking_booth_obj = self.env['parking.booth']
         #Generate Transaction ID
-        trans_id = self._generate_trans_id(cr, uid, context=context)
-                
-        booth_id = values.get('entry_booth_id')        
-        if not booth_id:
-            raise osv.except_osv(('Warning'),   ('Booth not defined!'))
-          
-        booth = self.pool.get('parking.booth').get_trans(cr, uid, [booth_id], context=context)                                                  
-        trans_id = booth['code'] + trans_id
+        trans_id = self._generate_trans_id()
+
+        if 'entry_booth_id' in values.keys():
+            raise ValidationError('Entry Booth not defined!')
+
+        booth_id = values.get('entry_booth_id')
+        booth = parking_booth_obj.browse(booth_id)
+
+        if not booth:
+            raise ValidationError('Booth not valid!')
+
+        trans_id = booth.code + trans_id
+
         if booth.with_sequence:
-            sequence_number = self.pool.get('parking.booth').generate_sequence_number(cr, uid, [booth.id], context=context)
-            values.update({'sequence_number': sequence_number})
+            booth.generate_sequence_number()
+            values.update({'sequence_number': booth.sequence_number})
             
         if 'state' in values.keys():
             
@@ -770,15 +706,12 @@ class parking_transaction(osv.osv):
                 raise osv.except_osv(('Warning'),   ('Method not defined!'))  
                         
     
-    def write(self, cr, uid, ids, values, context=None):              
+    def write(self, values):
         
-        trans  = self.get_trans(cr, uid, ids, context=context)     
+        trans = self
 
-        if not trans:
-            raise osv.except_osv(('Error'), ('Transaction not Found!'))
-                
         if trans.state == 'done':
-            raise osv.except_osv(('Warning'),   ('Transaction Already Closed!'))                
+            raise ValidationError('Transaction Already Closed!')
                     
         if 'state' in values.keys():
 
@@ -868,10 +801,8 @@ class parking_transaction(osv.osv):
             
         return super(parking_transaction,self).write(cr, uid, ids, values, context=context)             
 
-parking_transaction() 
 
-
-class parking_transaction_charging(osv.osv):
+class parking_transaction_charging(models.Model):
     _name = "parking.transaction.charging"
     _decription = "Parking Transaction Charging"
     
@@ -881,9 +812,8 @@ class parking_transaction_charging(osv.osv):
         'total_charging': fields.float('Total Charging'),
     }
         
-parking_transaction_charging()    
 
-class parking_transaction_correction(osv.osv):
+class parking_transaction_correction(models.Model):
     _name = "parking.transaction.correction"
     _description = "Parking Transaction Correction"
     _columns = {
@@ -892,4 +822,3 @@ class parking_transaction_correction(osv.osv):
         'remarks': fields.text('Remarks'),        
     }
     
-parking_transaction_correction()

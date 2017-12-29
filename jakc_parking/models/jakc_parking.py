@@ -14,6 +14,7 @@ AVAILABLE_STATES = [
     ('done','Close'),
 ]
 
+
 class ParkingVehicleType(models.Model):
     _ame = "parking.vehicle.type"
     _description = "Parking Vehicle Type"
