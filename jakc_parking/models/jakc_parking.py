@@ -16,8 +16,9 @@ AVAILABLE_STATES = [
 
 
 class ParkingVehicleType(models.Model):
-    _ame = "parking.vehicle.type"
+    _name = "parking.vehicle.type"
     _description = "Parking Vehicle Type"
+
     name = fields.Char('Name', size=100, required=True)
     state = fields.Selection(AVAILABLE_STATES,'Status', size=16, readonly=True, default='open')
 
@@ -25,22 +26,21 @@ class ParkingVehicleType(models.Model):
 class ParkingShift(models.Model):
     _name = "parking.shift"
     _description = "Parking Shift"
-    
-    def get_trans(self, cr, uid, ids, context=None):
-        trans_id  = ids[0]
-        return self.browse(cr, uid, trans_id, context=context)
-    
-    def get_active_trans(self, cr, uid, context=None):
+
+    def get_active_trans(self):
         args = {'state','=','open'} 
-        ids = self.search(cr, uid, args, context=context)
-        return self.browse(cr, uid, ids, context=context)
-    
+        parking_shift_ids = self.search(args)
+        if len(parking_shift_ids)>0:
+            return parking_shift_ids[0]
+        else:
+            return False
+
     def _convert_time_to_str(self, float_time):
         str_float_time  = str(float_time)
         dict_float_time = str_float_time.split(".")
         hour = dict_float_time[0].zfill(2)
         minutes = str(Decimal(float(str_float_time)) % 1 * 60).replace(".","").zfill(2)[:2]
-        return hour + ":"  + minutes
+        return hour + ":" + minutes
 
     def get_current_shift(self):
         current_shift = False        

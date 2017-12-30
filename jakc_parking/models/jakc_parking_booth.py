@@ -43,6 +43,7 @@ AVAILABLE_CAMERA_POSITIONS = [
     ('1', 'Driver Camera')
 ]
 
+
 class ParkingBooth(models.Model):
     _name = "parking.booth"
 
@@ -150,8 +151,7 @@ class ParkingBoothPricing(models.Model):
         return super(ParkingBoothPricing, self).write(values)
 
 
-
-class parking_booth_camera(models.Model):
+class ParkingBoothCamera(models.Model):
     _name = "parking.booth.camera"
 
     booth_id = fields.Many2one('parking.booth', 'Booth', required=True)
