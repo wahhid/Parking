@@ -1,4 +1,7 @@
 import hr
+import res_partner
+import product
 import jakc_parking
 import jakc_parking_booth
 import jakc_parking_pricing
+import jakc_parking_transaction

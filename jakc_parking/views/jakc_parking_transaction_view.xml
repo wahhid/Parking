@@ -87,7 +87,6 @@
 	                        <field name="barcode"/>
 							<field name="card" groups="jakc_parking.group_parking_admin"/>
 	                        <field name="session_id"/>
-	                        <field name="trans_type"/>	                        
 	                        <field name="plat_number"/>
 	                        <field name="card_number"/>
 	                        <field name="sequence_number"/>
@@ -163,11 +162,10 @@
             <field name="model">parking.transaction</field>			
             <field name="type">tree</field>						
             <field name="arch" type="xml">
-                <tree string="Transaction"  version="7.0" create="false">
+                <tree string="Transaction" create="false">
 	            	<field name="trans_id"/>
 	            	<field name="barcode"/>
-	                <field name="trans_type"/>	                        
-	                <field name="plat_number"/>
+					<field name="plat_number"/>
 	                <field name="is_manual"/>
 	                <field name="entry_datetime"/>
 	                <field name="pricing_id"/>	                

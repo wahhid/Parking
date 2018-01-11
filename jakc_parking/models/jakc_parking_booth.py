@@ -102,10 +102,10 @@ class ParkingBooth(models.Model):
 class ParkingBoothPricing(models.Model):
     _name = "parking.booth.pricing"
 
-    def trans_set_default(self, cr, uid, ids, context=None):
+    def trans_set_default(self):
         values = {}
         values.update({'is_default': True})
-        return self.write(cr, uid, ids, values, context=context)
+        return self.write(values)
         
     def _get_default_booth_pricing(self):
         args = [('is_default','=',True)]
@@ -123,7 +123,7 @@ class ParkingBoothPricing(models.Model):
         self.write(values)
 
     @api.one
-    def _disable_default_booth_pricing(self, cr, uid, ids, context=None):        
+    def _disable_default_booth_pricing(self):
         values = {}
         values.update({'is_default': False})
         self.write(values)

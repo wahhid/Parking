@@ -3,12 +3,7 @@
     <data>
  		<!-- PARKING/SEQUENCE -->
 
-        <!-- TRANSACTION ID -->       	        
-        <record id="sequence_type_parking_transaction" model="ir.sequence.type">
-            <field name="name">Parking Transaction</field>
-            <field name="code">parking.transaction.sequence</field>
-        </record>
-        
+        <!-- TRANSACTION ID -->
         <record id="sequence_parking_transaction" model="ir.sequence">
             <field name="name">Parking Transaction</field>
             <field name="code">parking.transaction.sequence</field>			           
@@ -16,12 +11,7 @@
             <field name="number_increment">1</field>            
         </record>
        
-        <!-- MEMBERSHIP ID -->       	        
-        <record id="sequence_type_parking_membership" model="ir.sequence.type">
-            <field name="name">Parking Membership</field>
-            <field name="code">parking.membership.sequence</field>
-        </record>
-        
+        <!-- MEMBERSHIP ID -->
         <record id="sequence_parking_membership" model="ir.sequence">
             <field name="name">Parking Membership</field>
             <field name="code">parking.membership.sequence</field>			           

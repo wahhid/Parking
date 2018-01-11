@@ -61,9 +61,6 @@ class ParkingShift(models.Model):
             
             start_datetime = tzinfo.localize(datetime.strptime(shift_start,'%Y-%m-%d %H:%M:%S'))
             end_datetime = tzinfo.localize(datetime.strptime(shift_end,'%Y-%m-%d %H:%M:%S'))
-            
-            #start_datetime = datetime.strptime(shift_start,'%Y-%m-%d %H:%M:%S')
-            #end_datetime = datetime.strptime(shift_end,'%Y-%m-%d %H:%M:%S')            
 
             if str_now > start_datetime and str_now < end_datetime:
                 current_shift = shift                

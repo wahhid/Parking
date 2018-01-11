@@ -27,21 +27,26 @@ AVAILABLE_MEMBER_STATE = [
 
 
 class ResPartner(models.Model):
-
     _inherit = "res.partner"
 
-    is_parking_member = fields.Boolean('Is Parking Member'),
-    is_employee = fields.Boolean('Is Employee'),
-    parking_membership_ids = fields.One2many('parking.membership', 'res_partner_id', 'Parking Membership'),
+    @api.one
+    def get_car_count(self):
+        for partner in self:
+            count = 0
+            for membership in partner.parking_membership_ids:
+                if membership.state == 'open':
+                    count += 1
+        self.car_count = count
 
+    is_parking_member = fields.Boolean('Is Parking Member')
+    is_employee = fields.Boolean('Is Employee')
+    parking_membership_ids = fields.One2many('parking.membership', 'res_partner_id', 'Parking Membership')
+    car_count = fields.Integer(compute="get_car_count", string='Car #')
 
 class ParkingMembership(models.Model):
     _name = "parking.membership"
     _inherit = ['mail.thread']
-    
-    def get_trans(self, cr, uid, ids, context=None):
-        trans_id = ids[0]
-        return self.browse(cr, uid, trans_id, context=context)
+    _rec_name = 'plat_number'
 
     @api.one
     def trans_confirm(self):
@@ -54,40 +59,23 @@ class ParkingMembership(models.Model):
         values = {}
         values.update({'state':'open'})
         self.write(values)
-    
-    def _confirm(self, cr, uid, ids, values, context=None):
-        return super(ParkingMembership, self).write(cr, uid, ids, values, context=context)
-    
-    def _re_open(self, cr, uid, ids, values, context=None):
-        return super(parking_membership, self).write(cr, uid, ids, values, context=context)
-    
-    def _generate_membership_id(self, cr, uid, ids, context=None):
+
+    def generate_membership_id(self):
         _logger.info('Start Generate Membership ID')        
-        trans_seq_id = self.pool.get('ir.sequence').get(cr, uid, 'parking.membership.sequence'),            
+        trans_seq_id = self.env['ir.sequence'].get('parking.membership.sequence')
         trans_data = {}
         trans_data.update({'membership_id':trans_seq_id[0]})        
-        super(parking_membership,self).write(cr, uid, ids, trans_data, context=context)
+        super(ParkingMembership,self).write(trans_data)
         _logger.info('End Generate Membership ID')
 
-    def _is_car_in_parking_area(self, cr, uid, context=None):
+    def _is_car_in_parking_area(self):
         _logger.info('Start Is Car In Parking Area')
         _logger.info('End Is Car In Parking Area')
         
-    def _get_last_membership(self, cr, uid, context=None):
+    def _get_last_membership(self):
         _logger.info('Start Get Last Membership')
         
         _logger.info('End Get Last Membership')
-    
-    def name_get(self, cr, uid, ids, context=None):
-        if context is None:
-            context = {}
-        if isinstance(ids, (int, long)):
-            ids = [ids]
-        res = []
-        for record in self.browse(cr, uid, ids, context=context):            
-            name = record.res_partner_id.name + " (" + record.plat_number + ")"
-            res.append((record.id, name))
-        return res
 
     membership_id = fields.Char('Membership #', size=10, readonly=True)
     res_partner_id = fields.Many2one('res.partner', 'Customer', required=True)
@@ -95,158 +83,97 @@ class ParkingMembership(models.Model):
     card_number = fields.Char('Card Number', size=20)
     product_id = fields.Many2one('product.product', 'Product')
     membership_payment_ids = fields.One2many('parking.membership.payment', 'parking_membership_id', 'Payments')
+
     state = fields.Selection(AVAILABLE_STATES, 'Status', readonly=True, default='draft')
 
     @api.model
     def create(self, values):
         result = super(ParkingMembership,self).create(values)
-        result._generate_membership_id()
+        result.generate_membership_id()
         return result
+
 
 class ParkingMembershipPayment(models.Model):
     _name = "parking.membership.payment"
 
-    def get_trans(self, cr, uid, ids, context=None):
-        trans_id = ids[0]
-        return self.browse(cr, uid, trans_id, context=context)
-    
+
+    @api.one
     def trans_create_invoice(self):
-        print "Invoice ID : " + str(ids[0])
-        values = {}
-        values.update({'state':'invoiced'})        
-        self._create_invoice(cr, uid, ids, values, context=context)
-        
-    def trans_cancel_invoice(self,cr, uid, ids, context=None):
-        trans_id = ids[0]
-        
-    def _create_invoice(self):
-        
         invoice_obj = self.env['account.invoice']
-        invoice_line_obj = self.pool.get('account.invoice.line')
-        invoice_tax_obj = self.pool.get('account.invoice.tax')
-        parking_membership_obj = self.pool.get('parking.membership')
-        
-        if type(ids) in (int, long,):
-            ids = [ids]
-            
-        trans = self.get_trans(cr, uid, ids, context=context)
-        if not trans:
-            raise osv.except_osv(('Warning'), ('Parking Membership Payment Error!'))
-            
-        #print trans 
+        invoice_line_obj = self.env['account.invoice.line']
+        invoice_tax_obj = self.env['account.invoice.tax']
+        parking_membership_obj = self.env['parking.membership']
+        values = {}
+        values.update({'state':'invoiced'})
+        trans = self
+
+        # print trans
         partner = trans.parking_membership_id.res_partner_id
         product = trans.parking_membership_id.product_id
         account_id = partner.property_account_receivable and partner.property_account_receivable.id or False
         fpos_id = partner.property_account_position and partner.property_account_position.id or False
-        
-        #Create Invoice
+
+        # Create Invoice
         invoice_values = {}
         invoice_values.update({'partner_id': partner.id})
         invoice_values.update({'account_id': account_id})
-        invoice_values.update({'fiscal_position': fpos_id})        
-        invoice_id = invoice_obj.create(cr, uid, invoice_values, context=context)
-                
-        #Update Invoice ID and Status
-        values.update({'invoice_id': invoice_id})
-        super(parking_membership_payment,self).write(cr, uid, ids, values, context=context)        
-        
-        #Create Invoice Line
+        invoice_values.update({'fiscal_position': fpos_id})
+        invoice_id = invoice_obj.create(invoice_values)
+
+        # Update Invoice ID and Status
+        self.invoice_id = invoice_id.id
+
+        # Create Invoice Line
         quantity = trans.payment_duration
-        account_line_values =  {
-                'product_id': product.id,
-                'quantity': trans.payment_duration,
-            }
-        
-        line_dict = invoice_line_obj.product_id_change(cr, uid, {}, product.id, False, quantity, '', 'out_invoice', partner.id, fpos_id, price_unit=0.0, context=context)
+        account_line_values = {
+            'product_id': product.id,
+            'quantity': trans.payment_duration,
+        }
+
+        line_dict = invoice_line_obj.product_id_change({}, product.id, False, quantity, '', 'out_invoice', partner.id, fpos_id, price_unit=0.0)
         account_line_values.update(line_dict['value'])
         account_line_values['invoice_id'] = invoice_id
-        invoice_line_id = invoice_line_obj.create(cr, uid, account_line_values, context=context)
-        invoice_obj.write(cr, uid, invoice_id, {'invoice_line': [(6, 0, [invoice_line_id])]}, context=context)
-        
-        return True            
-        
-    def _get_membership_state(self, cr, uid, ids, name, args, context=None):
-        trans = self.get_trans(cr, uid, ids, context=context)        
-        res = {}
-        for id in ids:            
-            res[id] = 'none'
-        for id in ids:
-            invoice_id = trans.invoice_id            
-            invoice_state = invoice_id.state
-            if invoice_state == 'paid':
-                res[id] = 'paid'        
-            if invoice_state == 'open':
-                res[id] = 'invoiced'
-            if invoice_state == 'cancel':
-                res[id] = 'canceled'
-            if invoice_state == 'draft' or invoice_state == 'proforma':
-                res[id] = 'waiting'                        
-        return res
+        invoice_line_id = invoice_line_obj.create(account_line_values)
+        invoice_obj.write({'invoice_line': [(6, 0, [invoice_line_id])]})
 
-    @api.onchange('payment_duration')
+    @api.one
+    def trans_cancel_invoice(self):
+        trans = self
+
+    @api.onchange('parking_membership_id', 'payment_duration', 'start_date')
     def onchange_payment_duration(self):
-        if not self.end_date:
-            raise ValidationError('End Date cannot be null')
-        self.end_date = datetime.today()+ relativedelta(months=self.payment_duration)
+        if self.parking_membership_id and self.start_date and self.payment_duration > 0:
+            self.end_date = datetime.strptime(self.start_date,'%Y-%m-%d') + relativedelta(months=self.payment_duration)
+            self.total_amount = self.parking_membership_id.product_id.list_price * self.payment_duration
 
-
-    def name_get(self, cr, uid, ids, context=None):
-        if context is None:
-            context = {}
-        if isinstance(ids, (int, long)):
-            ids = [ids]
-        res = []
-        for record in self.browse(cr, uid, ids, context=context):            
-            name = "Payment For " + " " + record.parking_membership_id.membership_id 
-            res.append((record.id, name))
-        return res  
-    
-
-    #def name_get(self, cr, uid, ids, context=None):
-    #    trans = self.get_trans(cr, uid, ids, context=context)
-    #    res = []
-    #    name = "Payment for " + trans.parking_membership_id.membership_id
-    #    res.append((trans.id, name))
-    #    return res               
-
-    parking_membership_id = fields.Many2one('parking.membership', 'Parking Membership', required=True),
-    trans_date = fields.Date('Transaction Date', required=True, readonly=True),
-    payment_duration = fields.Integer('Payment Duration (in month)'),
-    start_date = fields.Date('Start Date', readonly=True),
-    end_date = fields.Date('End Date', readonly=True),
-    total_amount = fields.Float('Total Payment', readoly=True),
-    invoice_id = fields.Many2one('account.invoice', 'Invoice', readonly=True),
-    invoice_state = fields.function(_get_membership_state, string='Invoice Status', type='selection',
-                                     selection=AVAILABLE_MEMBER_STATE),
-    state = fields.function(_get_membership_state, string='Status', type='selection',
-                             selection=AVAILABLE_MEMBER_STATE),
-    
-    _defaults = {        
-        'trans_date': fields.date.context_today,
-        'payment_duration': lambda *a: 1, 
-        'start_date': fields.date.context_today,                      
-        'state': lambda *a: 'none',
-    }
+    parking_membership_id = fields.Many2one('parking.membership', 'Parking Membership', required=True)
+    trans_date = fields.Date('Transaction Date', required=True, readonly=True, default=datetime.today())
+    payment_duration = fields.Integer('Payment Duration (in month)', required=True, default=1)
+    billing_type = fields.Selection([('nobilling','Non Billing'),('billing','Billing')],'Billing Type', default='nobilling', required=True)
+    start_date = fields.Date('Start Date', required=True, default=datetime.today())
+    end_date = fields.Date('End Date', readonly=True)
+    total_amount = fields.Float('Total Payment', readonly=True)
+    invoice_id = fields.Many2one('account.invoice', 'Invoice', readonly=True)
+    state = fields.Selection(AVAILABLE_MEMBER_STATE, 'State', readonly=True)
 
     @api.model
     def create(self, values):
         end_date = datetime.today()+ relativedelta(months=values.get('payment_duration'))  
         values.update({'end_date': end_date})
-        return super(parking_membership_payment, self).create(cr, uid, values, context=context)
+        return super(ParkingMembershipPayment, self).create(values)
 
     @api.multi
-    def write(self, cr, uid, ids, values, context=None):
-        trans = self.get_trans(cr, uid, ids, context=context)        
+    def write(self, values):
+        trans = self
         if trans.state == 'paid':
-            raise osv.except_osv(('Warning'), ('Transaction Already Paid!'))
+            raise ValidationError('Transaction Already Paid!')
         
         if 'state' in values.keys():
             if values.get('state') == 'invoiced':
-                return self._create_invoice(cr, uid, ids, values, context=context)
+                return self._create_invoice(values)
 
         if 'payment_duration' in values.keys():
             end_date = datetime.today()+ relativedelta(months=values.get('payment_duration'))  
             values.update({'end_date': end_date})        
-        return super(parking_membership_payment, self).write(cr, uid, ids, values, context=context)
-                            
-parking_membership_payment()
+        return super(ParkingMembershipPayment, self).write(values)
+

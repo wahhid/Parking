@@ -6,7 +6,7 @@
             <field name="osv">parking.transaction</field>
             <field name="on_create">True</field>
         </record>
-         <record id="parking_act_draf" model="workflow.activity">
+        <record id="parking_act_draf" model="workflow.activity">
             <field name="wkf_id" ref="wkf_parking"/>
             <field name="flow_start">True</field>
             <field name="name">draft</field>
