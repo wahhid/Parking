@@ -3,7 +3,7 @@ from datetime import datetime
 from decimal import Decimal
 from pytz import timezone
 
-from odoo import fields, models, api
+from openerp import fields, models, api
 
 _logger = logging.getLogger(__name__)
 

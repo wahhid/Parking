@@ -2,8 +2,8 @@ import logging
 from datetime import datetime
 from dateutil.relativedelta import relativedelta
 
-from odoo import models, fields, api
-from odoo.exceptions import ValidationError, Warning
+from openerp import models, fields, api
+from openerp.exceptions import ValidationError, Warning
 
 _logger = logging.getLogger(__name__)
 
@@ -110,8 +110,8 @@ class ParkingMembershipPayment(models.Model):
         # print trans
         partner = trans.parking_membership_id.res_partner_id
         product = trans.parking_membership_id.product_id
-        account_id = partner.property_account_receivable and partner.property_account_receivable.id or False
-        fpos_id = partner.property_account_position and partner.property_account_position.id or False
+        account_id = partner.property_account_receivable_id and partner.property_account_receivable_id.id or False
+        fpos_id = partner.property_account_position_id and partner.property_account_position_id.id or False
 
         # Create Invoice
         invoice_values = {}

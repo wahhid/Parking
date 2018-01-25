@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<openerp>
+    <data>
+        <template id="parking_transaction_index" name="BCP Shop">
+            <t t-call="website.layout">
+                <div id="wrap">
+                    <div class="oe_structure">
+                        <div class="container">
+                            <div class="row">
+                                <a href="/parking/transaction/entry" class="btn btn-block btn-lg btn-primary"><span class="glyphicon glyphicon-shopping-cart"></span> Entry</a>
+                                <a href="/parking/transaction/exit" class="btn btn-block btn-lg btn-success"><span class="glyphicon glyphicon-book"></span> Exit</a>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </t>
+        </template>
+    </data>
+</openerp>

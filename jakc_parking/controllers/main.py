@@ -1,37 +1,22 @@
-import base64
-import mimetypes
+import json
+import logging
+import werkzeug
+import werkzeug.utils
+from datetime import datetime
+from math import ceil
 
-import openerp.addons.web.http as oeweb
-from openerp.addons.web.controllers.main import content_disposition
+from openerp import SUPERUSER_ID
+from openerp.addons.web import http
+from openerp.http import request
+from openerp.tools.misc import DEFAULT_SERVER_DATETIME_FORMAT as DTF, ustr
 
 
-#----------------------------------------------------------
-# Controller
-#----------------------------------------------------------
-class ParkingController(oeweb.Controller):
-    _cp_path = '/parking'
+_logger = logging.getLogger(__name__)
 
-    @oeweb.httprequest
-    def download_attachment(self, req, model, id, method, attachment_id, **kw):
-        Model = req.session.model(model)
-        res = getattr(Model, method)(int(id), int(attachment_id))
-        if res:
-            filecontent = base64.b64decode(res.get('base64'))
-            filename = res.get('filename')
-            content_type = mimetypes.guess_type(filename)
-            if filecontent and filename:
-                return req.make_response(filecontent,
-                    headers=[('Content-Type', content_type[0] or 'application/octet-stream'),
-                            ('Content-Disposition', content_disposition(filename, req))])
-        return req.not_found()
-    
-    @oeweb.httprequest
-    def imageview(self, req, model, attachment_id, **kw):
-        Model = req.session.model(model)
-        headers = [('Content-Type', 'image/jpg')]                    
-        res = Model.read([id], ['datas'], req.context)[0]        
-        if res:
-            image_data = base64.b64decode(res.get('datas'))            
-            return req.make_response(image_data,headers)
-        return req.not_found()
-    
+
+class WebsiteParking(http.Controller):
+
+    @http.route('/parking/trans/index/', type='http', auth='public', website=True)
+    def parking_trans_index(self, platnumber=None):
+        data = {}
+        return request.website.render('parking.parking_transaction_index', data)
