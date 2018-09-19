@@ -1,9 +1,12 @@
 import logging
 from datetime import datetime
+from datetime import timedelta
 from dateutil.relativedelta import relativedelta
+from pytz import timezone
 
-from openerp import models, fields, api
-from openerp.exceptions import ValidationError, Warning
+from odoo import models, fields, api, _
+from odoo.exceptions import ValidationError, Warning
+from operator import itemgetter
 
 _logger = logging.getLogger(__name__)
 
@@ -23,6 +26,7 @@ AVAILABLE_MEMBER_STATE = [
     ('invoiced', 'Invoiced Member'),
     ('free', 'Free Member'),
     ('paid', 'Paid Member'),
+    ('done', 'Close'),
 ]
 
 
@@ -43,6 +47,7 @@ class ResPartner(models.Model):
     parking_membership_ids = fields.One2many('parking.membership', 'res_partner_id', 'Parking Membership')
     car_count = fields.Integer(compute="get_car_count", string='Car #')
 
+
 class ParkingMembership(models.Model):
     _name = "parking.membership"
     _inherit = ['mail.thread']
@@ -51,8 +56,8 @@ class ParkingMembership(models.Model):
     @api.one
     def trans_confirm(self):
         values = {}
-        values.update({'state':'open'})
-        self.write(values)
+        values.update({'state': 'paid'})
+        self.write()
 
     @api.one
     def trans_re_open(self):
@@ -74,8 +79,25 @@ class ParkingMembership(models.Model):
         
     def _get_last_membership(self):
         _logger.info('Start Get Last Membership')
-        
+
         _logger.info('End Get Last Membership')
+
+    @api.one
+    def check_valid_payment(self):
+        status = False;
+        tzinfo = timezone('Asia/Jakarta')
+        str_now = datetime.today()
+        _logger.debug("Now : " + str_now.strftime('%Y-%m-%d %H:%M:%S'))
+        membership_payment_ids = self.membership_payment_ids
+        for line in membership_payment_ids:
+            if line.state == 'paid':
+                _logger.debug(line)
+                start_date = datetime.strptime(line.start_date, '%Y-%m-%d')
+                end_date = datetime.strptime(line.end_date, '%Y-%m-%d')
+                if start_date < str_now and end_date > str_now:
+                    status = True
+                    break
+        return status
 
     membership_id = fields.Char('Membership #', size=10, readonly=True)
     res_partner_id = fields.Many2one('res.partner', 'Customer', required=True)
@@ -83,7 +105,6 @@ class ParkingMembership(models.Model):
     card_number = fields.Char('Card Number', size=20)
     product_id = fields.Many2one('product.product', 'Product')
     membership_payment_ids = fields.One2many('parking.membership.payment', 'parking_membership_id', 'Payments')
-
     state = fields.Selection(AVAILABLE_STATES, 'Status', readonly=True, default='draft')
 
     @api.model
@@ -96,70 +117,61 @@ class ParkingMembership(models.Model):
 class ParkingMembershipPayment(models.Model):
     _name = "parking.membership.payment"
 
-
     @api.one
     def trans_create_invoice(self):
-        invoice_obj = self.env['account.invoice']
-        invoice_line_obj = self.env['account.invoice.line']
-        invoice_tax_obj = self.env['account.invoice.tax']
-        parking_membership_obj = self.env['parking.membership']
-        values = {}
-        values.update({'state':'invoiced'})
-        trans = self
-
-        # print trans
-        partner = trans.parking_membership_id.res_partner_id
-        product = trans.parking_membership_id.product_id
-        account_id = partner.property_account_receivable_id and partner.property_account_receivable_id.id or False
-        fpos_id = partner.property_account_position_id and partner.property_account_position_id.id or False
-
-        # Create Invoice
-        invoice_values = {}
-        invoice_values.update({'partner_id': partner.id})
-        invoice_values.update({'account_id': account_id})
-        invoice_values.update({'fiscal_position': fpos_id})
-        invoice_id = invoice_obj.create(invoice_values)
-
-        # Update Invoice ID and Status
-        self.invoice_id = invoice_id.id
-
-        # Create Invoice Line
-        quantity = trans.payment_duration
-        account_line_values = {
-            'product_id': product.id,
-            'quantity': trans.payment_duration,
+        partner_id = self.parking_membership_id.res_partner_id
+        invoice = self.env['account.invoice'].create({
+            'partner_id': partner_id.id,
+            'account_id': partner_id.property_account_receivable_id.id,
+            'fiscal_position_id': partner_id.property_account_position_id.id,
+            'comment': 'Payment Non Billing for ' + self.start_date + ' to ' + self.end_date
+        })
+        line_values = {
+            'product_id': self.parking_membership_id.product_id.id,
+            'price_unit': self.total_amount,
+            'invoice_id': invoice.id,
         }
+        # create a record in cache, apply onchange then revert back to a dictionnary
+        invoice_line = self.env['account.invoice.line'].new(line_values)
+        invoice_line._onchange_product_id()
+        line_values = invoice_line._convert_to_write({name: invoice_line[name] for name in invoice_line._cache})
+        line_values['price_unit'] = self.total_amount
+        invoice.write({'invoice_line_ids': [(0, 0, line_values)]})
+        invoice.compute_taxes()
+        self.invoice_id = invoice.id
 
-        line_dict = invoice_line_obj.product_id_change({}, product.id, False, quantity, '', 'out_invoice', partner.id, fpos_id, price_unit=0.0)
-        account_line_values.update(line_dict['value'])
-        account_line_values['invoice_id'] = invoice_id
-        invoice_line_id = invoice_line_obj.create(account_line_values)
-        invoice_obj.write({'invoice_line': [(6, 0, [invoice_line_id])]})
-
-    @api.one
-    def trans_cancel_invoice(self):
-        trans = self
-
-    @api.onchange('parking_membership_id', 'payment_duration', 'start_date')
+    @api.onchange('payment_duration', 'start_date')
     def onchange_payment_duration(self):
         if self.parking_membership_id and self.start_date and self.payment_duration > 0:
             self.end_date = datetime.strptime(self.start_date,'%Y-%m-%d') + relativedelta(months=self.payment_duration)
             self.total_amount = self.parking_membership_id.product_id.list_price * self.payment_duration
 
+    @api.one
+    def get_state(self):
+        str_now = datetime.today()
+        if datetime.strptime(self.end_date, '%Y-%m-%d') < str_now:
+            self.state = self.invoice_id.state
+        else:
+            self. state = 'done'
+
     parking_membership_id = fields.Many2one('parking.membership', 'Parking Membership', required=True)
-    trans_date = fields.Date('Transaction Date', required=True, readonly=True, default=datetime.today())
+    trans_date = fields.Date('Transaction Date', readonly=True, default=datetime.today())
     payment_duration = fields.Integer('Payment Duration (in month)', required=True, default=1)
     billing_type = fields.Selection([('nobilling','Non Billing'),('billing','Billing')],'Billing Type', default='nobilling', required=True)
     start_date = fields.Date('Start Date', required=True, default=datetime.today())
-    end_date = fields.Date('End Date', readonly=True)
+    end_date = fields.Date('End Date', readonly=True, default=datetime.today() + relativedelta(months=1))
     total_amount = fields.Float('Total Payment', readonly=True)
     invoice_id = fields.Many2one('account.invoice', 'Invoice', readonly=True)
-    state = fields.Selection(AVAILABLE_MEMBER_STATE, 'State', readonly=True)
+    state = fields.Selection(AVAILABLE_MEMBER_STATE, 'State', compute='get_state', readonly=True)
+
 
     @api.model
     def create(self, values):
-        end_date = datetime.today()+ relativedelta(months=values.get('payment_duration'))  
+        parking_membership_obj = self.env['parking.membership']
+        parking_membership = parking_membership_obj.browse(values.get('parking_membership_id'))
+        end_date = datetime.today() + relativedelta(months=values.get('payment_duration'))
         values.update({'end_date': end_date})
+        values.update({'total_amount' : parking_membership.product_id.list_price * values.get('payment_duration')})
         return super(ParkingMembershipPayment, self).create(values)
 
     @api.multi
@@ -173,7 +185,8 @@ class ParkingMembershipPayment(models.Model):
                 return self._create_invoice(values)
 
         if 'payment_duration' in values.keys():
-            end_date = datetime.today()+ relativedelta(months=values.get('payment_duration'))  
-            values.update({'end_date': end_date})        
+            end_date = datetime.strptime(self.start_date,'%Y-%m-%d') + relativedelta(months=values.get('payment_duration'))
+            values.update({'end_date': end_date})
+            values.update({'total_amount': trans.parking_membership_id.product_id.list_price * values.get('payment_duration')})
         return super(ParkingMembershipPayment, self).write(values)
 

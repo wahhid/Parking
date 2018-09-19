@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+      <meta charset="utf-8">
+      <meta http-equiv="X-UA-Compatible" content="IE=edge">
+      <title>Parking LTE 2 | </title>
+      <!-- HTML5 Shim and Respond.js IE8 support of HTML5 elements and media queries -->
+      <!-- WARNING: Respond.js doesn't work if you view the page via file:// -->
+      <!--[if lt IE 9]>
+      <script src="https://oss.maxcdn.com/html5shiv/3.7.3/html5shiv.min.js"></script>
+      <script src="https://oss.maxcdn.com/respond/1.4.2/respond.min.js"></script>
+      <![endif]-->
+
+      <!-- Google Font -->
+      <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Source+Sans+Pro:300,400,600,700,300italic,400italic,600italic">
+
+    <!-- cssmain content -->
+    {% block maincss %}{% endblock %}
+    <!-- end cssmain content -->
+
+    <!-- csscustom content -->
+    {% block customcss %}{% endblock %}
+    <!-- end csscustom content -->
+
+  </head>
+
+  <body class="nav-md">
+
+  <div class="container">
+      <!-- Static navbar -->
+      <nav class="navbar navbar-default">
+          <div class="container-fluid">
+              <div class="navbar-header">
+                  <a class="navbar-brand" href="#">Parking Client</a>
+              </div>
+          </div><!--/.container-fluid -->
+      </nav>
+
+      <div class="container-fluid">
+          {%  block content %}{% endblock %}
+      </div>
+
+  </div> <!-- /container -->
+    {% block javascript %}{% endblock %}
+    {% block customjavascript %}{% endblock %}
+  </body>
+</html>

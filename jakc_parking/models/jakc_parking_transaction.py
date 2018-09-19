@@ -4,8 +4,8 @@ from datetime import datetime
 from pytz import timezone
 from random import randint
 
-from openerp import models, fields, api
-from openerp.exceptions import ValidationError, Warning
+from odoo import models, fields, api, _
+from odoo.exceptions import ValidationError, Warning
 
 _logger = logging.getLogger(__name__)
 
@@ -35,9 +35,9 @@ AVAILABLE_TRANS_TYPES = [
 
 
 AVAILABLE_INPUT_METHODS = [
-    ('0','Manless'),
-    ('1','Operator'),    
-    ('2','Manual'),                                
+    ('manless','Manless'),
+    ('operator','Operator'),
+    ('manual','Manual'),
 ]
 
 AVAILABLE_CHARGING_TYPES = [
@@ -59,7 +59,8 @@ class ParkingTransactionSession(models.Model):
     def trans_close(self):
         session = self
         parking_transaction_ids = session.parking_transaction_ids
-        parking_transaction_ids.write({'state':'done'})
+        for line in parking_transaction_ids:
+            line.write({'state':'done'})
         values = {}
         values.update({'state': 'done'})
         self.write(values)
@@ -106,24 +107,10 @@ class ParkingTransactionSession(models.Model):
     def correction(self, values):
         #self.message_post(cr, uid, ids[0], body="Correction", subtype='mt_comment', context=context)
         return super(ParkingTransactionSession, self).write(values)
-               
+
     def trans_receipt(self):
-        _logger.info("Print Receipt for ID : " + str(ids))            
-        id = ids[0]   
-        config = self.pool.get('parking.config').get_config(cr, uid, context=context)
-        serverUrl = 'http://' + config.report_server + ':' + config.report_server_port +'/jasperserver'
-        j_username = config.report_user
-        j_password = config.report_password
-        ParentFolderUri = '/parking'
-        reportUnit = '/parking/parking_session_receipt'
-        url = serverUrl + '/flow.html?_flowId=viewReportFlow&standAlone=true&_flowId=viewReportFlow&ParentFolderUri=' + ParentFolderUri + '&reportUnit=' + reportUnit + '&ID=' +  str(id) + '&decorate=no&j_username=' + j_username + '&j_password=' + j_password + '&output=pdf'
-        return {
-            'type':'ir.actions.act_url',
-            'url': url,
-            'nodestroy': True,
-            'target': 'new' 
-        }
-                       
+        pass
+
     def get_active_session(self, shift_id, booth_id, operator_id):
         args = [('shift_id','=' , shift_id),('booth_id','=',booth_id),('operator_id', '=' , operator_id),('session_date','=', datetime.now(timezone("Asia/Jakarta")).strftime('%Y-%m-%d'))]
         session_ids = self.search(args)
@@ -198,18 +185,21 @@ class ParkingTransactionSession(models.Model):
             raise ValidationError('Shift not Found')
 
         session = self.get_active_session(shift.id, values.get('booth_id'),values.get('operator_id'))
+        _logger.info("Session")
+        _logger.info(session)
         if session:
-            return session.id
+            return session
         else:
             if 'booth_id' not in values.keys():
                 raise ValidationError('Booth not Found')
             booth = parking_booth_obj.browse(values.get('booth_id'))
-
+            _logger.info(booth)
             if 'operator_id' not in values.keys():
                 raise ValidationError('Booth not Found')
             operator = res_users_obj.browse(values.get('operator_id'))
-
+            _logger.info(operator)
             name = operator.name + " - " + booth.name + " -  " + shift.name
+            _logger.info(name)
             str_now = datetime.now(timezone("Asia/Jakarta"))
             session_date = str_now.strftime('%Y-%m-%d')
             values.update({'name': name})
@@ -241,8 +231,8 @@ class ParkingTransaction(models.Model):
         prefix  = local_date.strftime('%Y%m%d%H%M%S%f')
         return prefix
         
-    def _check_vehicle(self, plat_number):
-        args = [('plat_number','=',plat_number),('state','=','entry')]        
+    def _check_vehicle(self, barcode):
+        args = [('barcode','=',barcode),('state','=','entry')]
         parking_transaction_ids = self.search(args)
         if len(parking_transaction_ids) > 0:
             return parking_transaction_ids[0]
@@ -250,22 +240,15 @@ class ParkingTransaction(models.Model):
             return False
     
     def _is_member_by_card_number(self, card_number):
+        _logger.info('Is Member By Card Number')
         parking_transaction = self
         args = [('card_number','=',card_number),('state','=','open')]
         parking_membership_ids = self.env['parking.membership'].search(args)
         if len(parking_membership_ids) > 0:
-            parking_membership = parking_membership_ids[0]
-            payment_args = [('parking_membership_id', '=', parking_membership.id), ('state', '=', 'paid')]
-            parking_membership_payment_ids = self.env['parking.membership.payment'].search(payment_args)
-            if len(parking_membership_payment_ids)>0:
-                parking_membership_payment = parking_membership_payment_ids[0]
-                if parking_membership_payment.end_date > parking_transaction.end_date and parking_membership_payment.start_date < parking_transaction.start_date:
-                    return True
-                else:
-                    return False
-            else:
-                return False
+            _logger.info("Find Membership")
+            return parking_membership_ids[0].check_valid_payment()
         else:
+            _logger.info("Cannot Find Membership")
             return False
         
     def _is_member_by_plat_number(self, plat_number):
@@ -293,32 +276,36 @@ class ParkingTransaction(models.Model):
         booth = parking_booth_obj.browse(values.get('booth_id'))
         if not booth:
             raise ValidationError('Booth not Found!')
+        _logger.info(booth.booth_type)
+
 
         shift = parking_shift_obj.get_current_shift()
         if not shift:
             raise ValidationError('Shift not Found!')
 
         values.update({'entry_shift_id': shift.id})
-
-        if booth.booth_type == '0':
+        if booth.booth_type == 'in':
             # Entry Booth
             values.update({'entry_booth_id': booth.id})
 
+            # Generate Trans ID
+            values.update({'trans_id': self._generate_trans_id()})
+
             # Fill Entry Date Time
-            utc_date = self._local_to_utc("Asia/Jakarta", datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
-            values.update({'entry_datetime': utc_date})
+            #utc_date = self._local_to_utc("Asia/Jakarta", datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
+            values.update({'entry_datetime': datetime.now()})
 
             # Generate Barcode
             barcode = self._random_with_N_digits(12)
 
-            if 'plat_number' in values.keys():
+            if 'barcode' in values.keys():
                 # Using RFID Card
-                trans = self._check_vehicle(values.get('plat_number'))
+                trans = self._check_vehicle(values.get('barcode'))
                 if trans:
                     raise ValidationError('Member Already Used!')
 
-                values.update({'card_number': values.get('plat_number')})
-                is_member = self._is_member_by_card_number(values.get('plat_number'))
+                values.update({'card_number': values.get('barcode')})
+                is_member = self._is_member_by_card_number(values.get('barcode'))
                 if is_member:
                     values.update({'trans_type': '1'})  # Trans type for Transaction Member
                     values.update({'entry_member': True})
@@ -330,6 +317,9 @@ class ParkingTransaction(models.Model):
                 values.update({'plat_number': str(barcode)})
                 values.update({'trans_type': '0'})  # Trans type for Transaction Casual
 
+            # Set State to Entry
+            values.update({'state': 'entry'})
+
             return super(ParkingTransaction,self).create(values)
         else:
             raise ValidationError('Booth not valid!')
@@ -339,6 +329,8 @@ class ParkingTransaction(models.Model):
         parking_booth_obj = self.env['parking.booth']
         parking_shift_obj = self.env['parking.shift']
 
+        if not values.get('booth_id'):
+            raise ValidationError('Booth not Found!')
         booth = parking_booth_obj.browse(values.get('booth_id'))
         if not booth:
             raise ValidationError('Booth not Found!')
@@ -347,9 +339,8 @@ class ParkingTransaction(models.Model):
         shift = parking_shift_obj.get_current_shift()
         if not shift:
             raise ValidationError('Shift not Found!')
-        values.update({'entry_shift_id': shift.id})
 
-        if booth.booth_type == '0':
+        if booth.booth_type == 'in':
             # Check Car In Area
             trans  = self._check_vehicle(values.get('plat_number'))
             if trans:
@@ -357,6 +348,9 @@ class ParkingTransaction(models.Model):
 
             #Entry Booth
             values.update({'entry_booth_id': booth.id})
+
+            #Entry Shift
+            values.update({'entry_shift_id': shift.id})
 
             #Generate Trans ID
             values.update({'trans_id': self._generate_trans_id()})
@@ -384,21 +378,25 @@ class ParkingTransaction(models.Model):
             values.update({'state':'entry'})
 
             return super(ParkingTransaction, self).create(values)
-        elif booth.booth_type == '1':
-            # Entry Booth
+
+        elif booth.booth_type == 'out':
+            # Exit Booth
             values.update({'exit_booth_id': booth.id})
 
+            # Exit Shift
+            values.update({'exit_shift_id': shift.id})
+
             #Exit Transaction
-            trans = self._check_vehicle(values.get('plat_number'))
+            trans = self._check_vehicle(values.get('barcode'))
             if not trans:
                 raise ValidationError('Car not exist!')
 
             # Fill Entry Date Time
-            utc_date = self._local_to_utc("Asia/Jakarta", datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
-            values.update({'exit_datetime': utc_date})
+            #utc_date = self._local_to_utc("Asia/Jakarta", datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
+            values.update({'exit_datetime': datetime.now()})
 
             # Check Member Status
-            is_member = self._is_member_by_plat_number(values.get('plat_number'))
+            is_member = self._is_member_by_card_number(values.get('barcode'))
 
             if is_member:
                 _logger.info('Car is member')
@@ -418,7 +416,6 @@ class ParkingTransaction(models.Model):
             trans.calculate_total_amount()
 
             return trans
-
         else:
             #Entry or Exit Transaction
             car_exist = self._check_vehicle(values.get('plat_number'))
@@ -491,7 +488,6 @@ class ParkingTransaction(models.Model):
         values.update({'state': 'exit'})
 
         return super(ParkingTransaction, self).write(values)
-
 
     @api.one
     def action_entry(self):
@@ -596,11 +592,12 @@ class ParkingTransaction(models.Model):
             result = self.env['parking.transaction.charging'].create(values)
     
     def calculate_missing_charge(self):
-        trans = self.get_trans(cr, uid, ids, context=context)
+        parking_transaction_charging_obj = self.env['parkng.']
+        trans = self.get_trans()
         pricing_id = trans.pricing_id
         
         if pricing_id.state != 'open':
-            raise osv.except_osv(('Warning'), ('Pricing not allowed!'))              
+            raise ValidationError(('Warning'), ('Pricing not allowed!'))
         
         total_amount = 0
                     
@@ -608,7 +605,7 @@ class ParkingTransaction(models.Model):
         values.update({'trans_id': trans.id})
         values.update({'charging_type': 'missing'})
         values.update({'total_charging': pricing_id.pinalty_charge})
-        result = self.pool.get('parking.transaction.charging').create(cr, uid, values, context=context)
+        result = self.pool.get('parking.transaction.charging').create(values)
         
     def calculate_total_amount(self):
         trans = self
@@ -620,35 +617,7 @@ class ParkingTransaction(models.Model):
         values.update({'total_amount': total_amount})    
         super(ParkingTransaction,self).write(values)
         
-    def _get_binary_filesystem(self, cr, uid, ids, name, arg, context=None):
-        """ Display the binary from ir.attachment, if already exist """
-        res = {}
-        attachment_obj = self.pool.get('ir.attachment')
-        for record in self.browse(cr, uid, ids, context=context):
-            res[record.id] = False
-            #attachment_ids = attachment_obj.search(cr, uid, [('res_model','=',self._name),('res_id','=',record.id),('binary_field','=',name)], context=context)
-            attachment_ids = attachment_obj.search(cr, uid, [('res_model','=',self._name),('res_id','=',record.id),('binary_field','=',name)], context=context)
-            import logging
-            _logger = logging.getLogger(__name__)
-            _logger.info('res %s', attachment_ids)
-            if attachment_ids:
-                img  = attachment_obj.browse(cr, uid, attachment_ids, context=context)[0].datas                
-                res[record.id] = img
-        return res
-    
-    def _set_binary_filesystem(self, cr, uid, id, name, value, arg, context=None):
-        """ Create or update the binary in ir.attachment when we save the record """
-        attachment_obj = self.pool.get('ir.attachment')
-        #attachment_ids = attachment_obj.search(cr, uid, [('res_model','=',self._name),('res_id','=',id),('binary_field','=',name)], context=context)
-        attachment_ids = attachment_obj.search(cr, uid, [('res_model','=',self._name),('res_id','=',id),('binary_field','=',name)], context=context)        
-        if value:
-            if attachment_ids:
-                attachment_obj.write(cr, uid, attachment_ids, {'datas': value}, context=context)
-            else:
-                attachment_obj.create(cr, uid, {'res_model': self._name, 'res_id': id, 'name': 'Marketplace picture', 'binary_field': name, 'datas': value, 'datas_fname':'picture.jpg'}, context=context)
-        else:
-            attachment_obj.unlink(cr, uid, attachment_ids, context=context)
-            
+
     def _random_with_N_digits(self, number_digit):
         range_start = 10**(number_digit-1)
         range_end = (10**number_digit)-1
@@ -721,16 +690,14 @@ class ParkingTransaction(models.Model):
 
     @api.model
     def create(self, values):
-
         if 'input_method' in values.keys():
-            if values.get('input_method') not in ['0', '1', '2']:
-                raise ValidationError('Input Method not define')
-
-            if values.get('input_method') == '0':
+            if values.get('input_method') not in ['manless', 'operator', 'manual']:
+                raise ValidationError('Input Method not defined')
+            if values.get('input_method') == 'manless':
                 return self.prepare_entry_manless_transaction(values)
-            elif values.get('input_method') == '1':
+            if values.get('input_method') == 'operator':
                 return self.prepare_entry_operator_transaction(values)
-            else:
+            if values.get('input_method') == 'manual':
                 return self.prepare_entry_manual_transaction(values)
         else:
             raise ValidationError('Method not Valid')

@@ -1,0 +1,10 @@
+.show-info-box {
+  display: block !important;
+}
+.hidden-info-box {
+  display: none !important;
+  visibility: hidden !important;
+}
+.invisible-info-box {
+  visibility: hidden;
+}

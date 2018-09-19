@@ -1,0 +1,116 @@
+{% extends 'base.html' %}
+
+{% block maincss %}
+<!-- Bootstrap -->
+<link rel="stylesheet" href="{{ url_for('static', filename='css/lib/bootstrap/dist/css/bootstrap.min.css') }}">
+<!-- Parkir -->
+<link rel="stylesheet" href="{{ url_for('static', filename='css/parkir.css') }}">
+{% endblock %}
+
+{% block content %}
+<!-- Main component for a primary marketing message or call to action -->
+<div class="row">
+    <div class="panel panel-default">
+        <div class="panel-body">
+            <div class="row">
+                <div class="col-md-4 col-xs-12">
+                    <div class="row">
+                        <div class="col-md-12 col-xs-12">
+                            <div class="form-group">
+                                <textarea class="form-control rounded-0" id="textareahistory" style="height:450px;overflow: hidden;white-space: nowrap;text-overflow: ellipsis;"></textarea>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="row">
+                        <div class="col-md-12 col-xs-12">
+                            <div class="form-group">
+                                <input class="form-control" type="text" id="inputcommand"/>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-8 col-xs-12">
+                    <div class="panel panel-default">
+                        <div class="panel-body">
+                            <center>
+                                <video id="camera01" autoplay></video>
+                                <canvas id="canvas01" style="display:none;"></canvas>
+                            </center>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block javascript %}
+<script src="{{ url_for('static', filename='js/lib/jquery/dist/jquery.min.js') }}"></script>
+<script src="{{ url_for('static', filename='js/lib/bootstrap/dist/js/bootstrap.min.js') }}"></script>
+<script src="{{ url_for('static', filename='js/lib/socket.io/dist/socket.io.js') }}"></script>
+
+{% endblock %}
+
+{% block customjavascript %}
+<script>
+    $(document).ready(function(){
+            var socket = io.connect('http://' + document.domain + ':' + location.port + '/test');
+            socket.on('my response', function(msg) {
+                 $('#textareahistory').append('Received: ' + msg.data + '\n');
+            });
+            $('form#emit').submit(function(event) {
+                socket.emit('my event', {data: $('#emit_data').val()});
+                return false;
+            });
+            $('form#broadcast').submit(function(event) {
+                socket.emit('my broadcast event', {data: $('#broadcast_data').val()});
+                return false;
+            });
+
+
+        const video01 = document.querySelector('#camera01');
+        const canvas01 = document.querySelector('#canvas01');
+        const img01 = document.querySelector('#image-camera-01');
+        const screenshotButton01 = document.querySelector('#screenshot-button01');
+
+        navigator.mediaDevices.enumerateDevices()
+        .then(function(devices) {
+          var i = 1;
+          devices.forEach(function(device) {
+            var self = this;
+            if (device.kind === "videoinput"){
+                if(i == 1){
+                      const constraints01 = {
+                            video: {deviceId: device.deviceId}
+                       };
+                       navigator.mediaDevices.getUserMedia(constraints01).then((stream) => {video01.srcObject = stream});
+                }
+                if(i == 2){
+                     const constraints02 = {
+                        video: {deviceId: device.deviceId}
+                    };
+                    navigator.mediaDevices.getUserMedia(constraints02).then((stream) => {video02.srcObject = stream});
+                }
+                console.log(device.kind + ": " + device.label + " id = " + device.deviceId);
+                i  = i + 1;
+            }
+          });
+        })
+        .catch(function(err) {
+          console.log(err.name + ": " + err.message);
+        });
+
+
+        $("#inputcommand").on('keyup', function (e) {
+            if (e.keyCode == 13) {
+                console.log("Enter");
+                $('#textareahistory').append(document.querySelector('#inputcommand').value + '\n');
+                socket.emit('my event', {data: document.querySelector('#inputcommand').value});
+                document.querySelector('#inputcommand').value = "";
+            }
+        });
+    });
+</script>
+
+{% endblock %}

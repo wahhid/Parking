@@ -1,0 +1,23 @@
+{
+	"config_serial":{
+		"name":"serial",
+		"baudrate":19200,
+		"parity":"None",
+		"stopbits":"1",
+		"bytesize":"8",
+		"timeout":"0",
+		"host":"/dev/tty.usbmodem1421"
+		},
+	"database":{
+		"engine":"mysql",
+		"username":"root",
+		"password":"ayambakar",
+		"port":"3306",
+		"database":"my-db",
+		"host":"localhost"
+	},
+	"flask_config":{
+		"config":"development",
+		"secret_key":"rendi_123"
+	}
+}
